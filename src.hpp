@@ -6,8 +6,8 @@
 #include <vector>
 // Do not include any other headers to satisfy constraints
 
-// Forward declaration of Task to match OJ driver expectation
-class Task;
+// Ensure Task is a complete type when this header is included by OJ main
+#include "Task.hpp"
 
 class TaskNode {
     friend class TimingWheel;
