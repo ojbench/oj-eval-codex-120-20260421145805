@@ -192,9 +192,6 @@ inline void Timer::cancelTask(TaskNode *p) {
 inline std::vector<Task*> Timer::tick() {
     std::vector<Task*> ready;
 
-    // advance global time
-    Task::incTime();
-
     // advance seconds wheel
     size_t prev_sec_slot = sec.current_slot;
     sec.current_slot = (sec.current_slot + 1) % sec.size;
