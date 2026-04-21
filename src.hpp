@@ -13,7 +13,7 @@ class TaskNode {
     friend class TimingWheel;
     friend class Timer;
 public:
-    TaskNode() : task(nullptr), next(nullptr), prev(nullptr), time(0), wheel_level(0), canceled(false), slot_idx(0) {}
+    TaskNode() : task(nullptr), next(nullptr), prev(nullptr), time(0), wheel_level(0), canceled(false), slot_idx(0), rounds(0) {}
 
 private:
     Task* task;              // Associated task
@@ -23,6 +23,7 @@ private:
     int wheel_level;         // 0: seconds, 1: minutes, 2: hours
     bool canceled;           // Mark as canceled
     size_t slot_idx;         // current slot index within its wheel
+    int rounds;              // number of full rotations remaining at this wheel
 };
 
 class TimingWheel {
@@ -109,22 +110,30 @@ private:
         while (cur) {
             TaskNode* nxt = cur->next;
             cur->next = cur->prev = nullptr;
-            // recompute placement in lower wheel based on remaining time
-            int t = cur->time; // remaining seconds within next lower wheel range
-            size_t slot;
-            if (from_is_hour) {
-                // t encodes minutes*60 + seconds
-                size_t minutes = (size_t)t / 60;
-                size_t secs = (size_t)t % 60;
-                slot = (to.current_slot + (minutes % to.size)) % to.size; // 'to' is minute wheel
-                cur->time = (int)secs; // remainder seconds for next cascade
+            if (cur->rounds > 0) {
+                // still has full cycles to survive at this wheel
+                cur->rounds -= 1;
+                // reinsert back to the same slot to wait another full rotation
+                insertNode(from, cur, idx);
             } else {
-                // from is minute wheel; t is seconds remainder
-                slot = (to.current_slot + (size_t)t) % to.size; // 'to' is second wheel
-                cur->time = 0;
+                // recompute placement in lower wheel based on remaining time
+                int t = cur->time; // remaining seconds within next lower wheel range
+                size_t slot;
+                if (from_is_hour) {
+                    // t encodes minutes*60 + seconds
+                    size_t minutes = (size_t)t / 60;
+                    size_t secs = (size_t)t % 60;
+                    slot = (to.current_slot + (minutes % to.size)) % to.size; // 'to' is minute wheel
+                    cur->time = (int)secs; // remainder seconds for next cascade
+                } else {
+                    // from is minute wheel; t is seconds remainder
+                    slot = (to.current_slot + (size_t)t) % to.size; // 'to' is second wheel
+                    cur->time = 0;
+                }
+                cur->wheel_level = to_level;
+                cur->rounds = 0;
+                insertNode(to, cur, slot);
             }
-            cur->wheel_level = to_level;
-            insertNode(to, cur, slot);
             cur = nxt;
         }
     }
@@ -141,16 +150,19 @@ private:
             node->wheel_level = 2;
             // time remaining within next lower wheel once cascaded (minutes*60 + secs)
             node->time = (int)(minutes * 60 + secs);
+            node->rounds = (int)(hours / hour.size);
             size_t slot = (hour.current_slot + (hours % hour.size)) % hour.size;
             insertNode(hour, node, slot);
         } else if (minutes > 0) {
             node->wheel_level = 1;
             node->time = (int)secs;
+            node->rounds = (int)(minutes / min.size);
             size_t slot = (min.current_slot + (minutes % min.size)) % min.size;
             insertNode(min, node, slot);
         } else {
             node->wheel_level = 0;
             node->time = (int)secs;
+            node->rounds = 0;
             size_t slot = (sec.current_slot + (secs % sec.size)) % sec.size;
             insertNode(sec, node, slot);
         }
