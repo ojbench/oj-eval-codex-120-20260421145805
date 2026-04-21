@@ -171,17 +171,52 @@ inline TaskNode* Timer::addTask(Task* task) {
 
 inline void Timer::cancelTask(TaskNode *p) {
     if (!p) return;
+    // Unlink from its current wheel if still linked
+    if (p->wheel_level == 0) {
+        if (p->next || p->prev || (sec.slots[p->slot_idx] == p)) {
+            removeNode(sec, p->slot_idx, p);
+        }
+    } else if (p->wheel_level == 1) {
+        if (p->next || p->prev || (min.slots[p->slot_idx] == p)) {
+            removeNode(min, p->slot_idx, p);
+        }
+    } else if (p->wheel_level == 2) {
+        if (p->next || p->prev || (hour.slots[p->slot_idx] == p)) {
+            removeNode(hour, p->slot_idx, p);
+        }
+    }
     p->canceled = true;
+    delete p;
 }
 
 inline std::vector<Task*> Timer::tick() {
     std::vector<Task*> ready;
 
+    // advance global time
+    Task::incTime();
+
     // advance seconds wheel
     size_t prev_sec_slot = sec.current_slot;
     sec.current_slot = (sec.current_slot + 1) % sec.size;
 
-    // Execute tasks in current seconds slot
+    // On seconds wrap, advance minute and possibly hour, and cascade before executing seconds
+    if (sec.current_slot == 0 && prev_sec_slot != 0) {
+        size_t prev_min_slot = min.current_slot;
+        min.current_slot = (min.current_slot + 1) % min.size;
+
+        bool min_wrapped = (min.current_slot == 0 && prev_min_slot != 0);
+        if (min_wrapped) {
+            size_t prev_hour_slot = hour.current_slot;
+            hour.current_slot = (hour.current_slot + 1) % hour.size;
+            (void)prev_hour_slot;
+            // First cascade from hour to minute
+            cascade(hour, min, 1, true);
+        }
+        // Then cascade from minute to seconds
+        cascade(min, sec, 0, false);
+    }
+
+    // Execute tasks in current seconds slot (after cascades)
     size_t sidx = sec.current_slot;
     TaskNode* cur = sec.slots[sidx];
     sec.slots[sidx] = nullptr;
@@ -201,22 +236,6 @@ inline std::vector<Task*> Timer::tick() {
             delete cur;
         }
         cur = nxt;
-    }
-
-    // Cascade only on wraps
-    bool wrapped_min = false;
-    if (sec.current_slot == 0 && prev_sec_slot != 0) {
-        size_t prev_min_slot = min.current_slot;
-        min.current_slot = (min.current_slot + 1) % min.size;
-        cascade(min, sec, 0, false);
-        wrapped_min = (min.current_slot == 0 && prev_min_slot != 0);
-    }
-
-    if (wrapped_min) {
-        size_t prev_hour_slot = hour.current_slot;
-        hour.current_slot = (hour.current_slot + 1) % hour.size;
-        (void)prev_hour_slot;
-        cascade(hour, min, 1, true);
     }
 
     return ready;
